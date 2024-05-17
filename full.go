@@ -43,6 +43,10 @@ func (r *fullReader) ReadDataset() (*Dataset, error) {
 	return &ds, nil
 }
 
+const (
+	fileMetaInformationGroupLengthLength = 4
+)
+
 func (r *fullReader) readMetaInfoElements(ds *Dataset) error {
 	var (
 		transferSyntaxUID string
@@ -70,7 +74,7 @@ func (r *fullReader) readMetaInfoElements(ds *Dataset) error {
 		ds.Elements = append(ds.Elements, elem)
 
 		if elem.Tag.Equal(tag.FileMetaInformationGroupLength) {
-			if elem.VR != vr.UL || elem.VL != 4 {
+			if elem.VR != vr.UL || elem.VL != fileMetaInformationGroupLengthLength {
 				return fmt.Errorf("incorrect FileMetaInformationGroupLength: vr=%s, vl=%d", elem.VR, elem.VL)
 			}
 
@@ -91,10 +95,6 @@ func (r *fullReader) readMetaInfoElements(ds *Dataset) error {
 
 	return nil
 }
-
-const (
-	itemLengthSize = 4
-)
 
 func (r *fullReader) readElements(ds *Dataset) error {
 	var err error
