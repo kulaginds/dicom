@@ -3,11 +3,11 @@ package dicom
 import (
 	"errors"
 	"fmt"
-	"github.com/kulaginds/dicom/uid"
 	"io"
 
 	"github.com/kulaginds/dicom/lowlevel"
 	"github.com/kulaginds/dicom/tag"
+	"github.com/kulaginds/dicom/uid"
 	"github.com/kulaginds/dicom/vr"
 	"github.com/kulaginds/dicom/vr/parse"
 )
@@ -46,7 +46,6 @@ func (r *fullReader) ReadDataset() (*Dataset, error) {
 func (r *fullReader) readMetaInfoElements(ds *Dataset) error {
 	var (
 		transferSyntaxUID string
-		n                 int
 		err               error
 	)
 
@@ -55,7 +54,7 @@ func (r *fullReader) readMetaInfoElements(ds *Dataset) error {
 	for {
 		var elem Element
 
-		elem.Tag, err = r.lowReader.Tag()
+		err = r.readElementTag(&elem)
 		if errors.Is(err, io.EOF) {
 			break
 		}
@@ -63,30 +62,9 @@ func (r *fullReader) readMetaInfoElements(ds *Dataset) error {
 			return fmt.Errorf("read tag: %w", err)
 		}
 
-		elem.VR, err = r.lowReader.VR(elem.Tag)
+		err = r.readElementValue(&elem)
 		if err != nil {
-			return fmt.Errorf("read VR: %w", err)
-		}
-
-		elem.VL, err = r.lowReader.VL(elem.VR)
-		if err != nil {
-			return fmt.Errorf("read VL: %w", err)
-		}
-
-		if elem.VL == lowlevel.UndefinedLength {
-			return fmt.Errorf("element with undefined length: tag=(%x, %x), vr=%s",
-				elem.Tag.GroupNumber, elem.Tag.ElementNumber, elem.VR)
-		}
-
-		elem.Value = make([]byte, elem.VL)
-
-		n, err = io.ReadFull(r.lowReader, elem.Value)
-		if err != nil {
-			return fmt.Errorf("read value: %w", err)
-		}
-
-		if uint32(n) != elem.VL {
-			return fmt.Errorf("value length mismatch: expected %d, got %d", elem.VL, n)
+			return fmt.Errorf("read element value: %w", err)
 		}
 
 		ds.Elements = append(ds.Elements, elem)
@@ -119,13 +97,12 @@ const (
 )
 
 func (r *fullReader) readElements(ds *Dataset) error {
-	var (
-		t   tag.Tag
-		err error
-	)
+	var err error
 
 	for {
-		t, err = r.lowReader.Tag()
+		var elem Element
+
+		err = r.readElementTag(&elem)
 		if errors.Is(err, io.EOF) {
 			break
 		}
@@ -133,27 +110,8 @@ func (r *fullReader) readElements(ds *Dataset) error {
 			return fmt.Errorf("read tag: %w", err)
 		}
 
-		if t.Equal(tag.ItemDelimitationItem) {
-			err = r.lowReader.Skip(itemLengthSize)
-			if err != nil {
-				return fmt.Errorf("skip ItemDelimitationItem length: %w", err)
-			}
-
+		if elem.Tag.Equal(tag.ItemDelimitationItem) {
 			break
-		}
-
-		elem := Element{
-			Tag: t,
-		}
-
-		elem.VR, err = r.lowReader.VR(elem.Tag)
-		if err != nil {
-			return fmt.Errorf("read VR: %w", err)
-		}
-
-		elem.VL, err = r.lowReader.VL(elem.VR)
-		if err != nil {
-			return fmt.Errorf("read VL: %w", err)
 		}
 
 		if elem.VR == vr.SQ {
@@ -174,15 +132,36 @@ func (r *fullReader) readElements(ds *Dataset) error {
 	return nil
 }
 
+func (r *fullReader) readElementTag(elem *Element) error {
+	var err error
+
+	elem.Tag, err = r.lowReader.Tag()
+	if errors.Is(err, io.EOF) {
+		return err
+	}
+	if err != nil {
+		return fmt.Errorf("read tag: %w", err)
+	}
+
+	if !elem.Tag.Equal(tag.ItemDelimitationItem) {
+		elem.VR, err = r.lowReader.VR(elem.Tag)
+		if err != nil {
+			return fmt.Errorf("read VR: %w", err)
+		}
+	}
+
+	elem.VL, err = r.lowReader.VL(elem.VR)
+	if err != nil {
+		return fmt.Errorf("read VL: %w", err)
+	}
+
+	return nil
+}
+
 func (r *fullReader) readElementValue(elem *Element) error {
 	if elem.VL == lowlevel.UndefinedLength {
 		return fmt.Errorf("element with undefined length: tag=(%x, %x), vr=%s",
 			elem.Tag.GroupNumber, elem.Tag.ElementNumber, elem.VR)
-	}
-
-	if elem.Tag.Equal(tag.PixelData) {
-		a := 5
-		_ = a
 	}
 
 	elem.Value = make([]byte, elem.VL)
