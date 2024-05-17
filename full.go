@@ -3,11 +3,11 @@ package dicom
 import (
 	"errors"
 	"fmt"
+	"github.com/kulaginds/dicom/uid"
 	"io"
 
 	"github.com/kulaginds/dicom/lowlevel"
 	"github.com/kulaginds/dicom/tag"
-	"github.com/kulaginds/dicom/uid"
 	"github.com/kulaginds/dicom/vr"
 	"github.com/kulaginds/dicom/vr/parse"
 )
@@ -28,18 +28,11 @@ func (r *fullReader) ReadDataset() (*Dataset, error) {
 		return nil, fmt.Errorf("read header: %w", err)
 	}
 
-	var (
-		ds                Dataset
-		transferSyntaxUID string
-	)
+	var ds Dataset
 
-	transferSyntaxUID, err = r.readMetaInfoElements(&ds)
+	err = r.readMetaInfoElements(&ds)
 	if err != nil {
 		return nil, fmt.Errorf("read meta info elements: %w", err)
-	}
-
-	if transferSyntaxUID != "" {
-		r.lowReader.ByteOrder, r.lowReader.Implicit = uid.ParseTransferSyntaxUID(transferSyntaxUID)
 	}
 
 	err = r.readElements(&ds)
@@ -50,7 +43,7 @@ func (r *fullReader) ReadDataset() (*Dataset, error) {
 	return &ds, nil
 }
 
-func (r *fullReader) readMetaInfoElements(ds *Dataset) (string, error) {
+func (r *fullReader) readMetaInfoElements(ds *Dataset) error {
 	var (
 		transferSyntaxUID string
 		n                 int
@@ -67,21 +60,21 @@ func (r *fullReader) readMetaInfoElements(ds *Dataset) (string, error) {
 			break
 		}
 		if err != nil {
-			return "", fmt.Errorf("read tag: %w", err)
+			return fmt.Errorf("read tag: %w", err)
 		}
 
 		elem.VR, err = r.lowReader.VR(elem.Tag)
 		if err != nil {
-			return "", fmt.Errorf("read VR: %w", err)
+			return fmt.Errorf("read VR: %w", err)
 		}
 
 		elem.VL, err = r.lowReader.VL(elem.VR)
 		if err != nil {
-			return "", fmt.Errorf("read VL: %w", err)
+			return fmt.Errorf("read VL: %w", err)
 		}
 
 		if elem.VL == lowlevel.UndefinedLength {
-			return "", fmt.Errorf("element with undefined length: tag=(%x, %x), vr=%s",
+			return fmt.Errorf("element with undefined length: tag=(%x, %x), vr=%s",
 				elem.Tag.GroupNumber, elem.Tag.ElementNumber, elem.VR)
 		}
 
@@ -89,18 +82,18 @@ func (r *fullReader) readMetaInfoElements(ds *Dataset) (string, error) {
 
 		n, err = io.ReadFull(r.lowReader, elem.Value)
 		if err != nil {
-			return "", fmt.Errorf("read value: %w", err)
+			return fmt.Errorf("read value: %w", err)
 		}
 
 		if uint32(n) != elem.VL {
-			return "", fmt.Errorf("value length mismatch: expected %d, got %d", elem.VL, n)
+			return fmt.Errorf("value length mismatch: expected %d, got %d", elem.VL, n)
 		}
 
 		ds.Elements = append(ds.Elements, elem)
 
 		if elem.Tag.Equal(tag.FileMetaInformationGroupLength) {
 			if elem.VR != vr.UL || elem.VL != 4 {
-				return "", fmt.Errorf("incorrect FileMetaInformationGroupLength: vr=%s, vl=%d", elem.VR, elem.VL)
+				return fmt.Errorf("incorrect FileMetaInformationGroupLength: vr=%s, vl=%d", elem.VR, elem.VL)
 			}
 
 			metaGroupLength := parse.UL(elem.Value[:elem.VL], r.lowReader.ByteOrder)
@@ -114,7 +107,11 @@ func (r *fullReader) readMetaInfoElements(ds *Dataset) (string, error) {
 
 	r.lowReader = parentLowReader
 
-	return transferSyntaxUID, nil
+	if transferSyntaxUID != "" {
+		r.lowReader.ByteOrder, r.lowReader.Implicit = uid.ParseTransferSyntaxUID(transferSyntaxUID)
+	}
+
+	return nil
 }
 
 const (
