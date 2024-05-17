@@ -224,18 +224,13 @@ func (r *fullReader) readSequenceItem(item *SequenceItem) error {
 		return fmt.Errorf("read item tag: %w", err)
 	}
 
-	if item.Tag.Equal(tag.SequenceDelimitationItem) {
-		err = r.lowReader.Skip(itemLengthSize)
-		if err != nil {
-			return fmt.Errorf("skip SequenceDelimitationItem length: %w", err)
-		}
-
-		return nil
-	}
-
 	item.Length, err = r.lowReader.UInt32()
 	if err != nil {
 		return fmt.Errorf("read item length: %w", err)
+	}
+
+	if item.Tag.Equal(tag.SequenceDelimitationItem) {
+		return nil
 	}
 	if !item.Tag.Equal(tag.Item) {
 		return fmt.Errorf("unexpected tag instead Item: (%x, %x)", item.Tag.GroupNumber, item.Tag.ElementNumber)
